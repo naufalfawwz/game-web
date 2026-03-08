@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Snake Multiplayer</title>
+
+<style>
+
+body{
+background:#111;
+color:white;
+text-align:center;
+font-family:Arial;
+}
+
+#lobby,#waiting,#game{
+display:none;
+}
+
+canvas{
+background:black;
+border:3px solid white;
+}
+
+button,input{
+padding:10px;
+margin:5px;
+}
+
+</style>
+
+</head>
+
+<body>
+
+<div id="lobby">
+
+<h2>Snake Multiplayer</h2>
+
+<button onclick="createRoom()">Create Room</button>
+
+<br><br>
+
+<input id="roomInput" placeholder="ROOM CODE">
+
+<button onclick="joinRoom()">Join Room</button>
+
+</div>
+
+
+<div id="waiting">
+
+<h2>Waiting Player...</h2>
+
+Room Code: <span id="roomCode"></span>
+
+<br><br>
+
+Players: <span id="playerCount"></span>/4
+
+</div>
+
+
+<div id="game">
+
+<canvas id="gameCanvas" width="400" height="400"></canvas>
+
+</div>
+
+
+<script type="module">
+
+import { db, ref, set, update, onValue }
+from "../firebase.js";
+
+
+const grid=20
+
+const canvas=document.getElementById("gameCanvas")
+const ctx=canvas.getContext("2d")
+
+const playerId=Math.random().toString(36).substr(2,9)
+
+let roomId=null
+
+let snake=[{x:200,y:200}]
+
+let dx=grid
+let dy=0
+
+let players={}
+
+let food={x:100,y:100}
+
+
+
+function show(id){
+
+document.getElementById("lobby").style.display="none"
+document.getElementById("waiting").style.display="none"
+document.getElementById("game").style.display="none"
+
+document.getElementById(id).style.display="block"
+
+}
+
+show("lobby")
+
+
+
+function code(){
+
+const c="ABCDEFGHJKLMNPQRSTUVWXYZ123456789"
+
+let r=""
+
+for(let i=0;i<4;i++){
+
+r+=c[Math.floor(Math.random()*c.length)]
+
+}
+
+return r
+
+}
+
+
+
+window.createRoom=async function(){
+
+roomId=code()
+
+await set(ref(db,"rooms/"+roomId),{
+
+players:{
+[playerId]:true
+},
+
+food
+
+})
+
+document.getElementById("roomCode").innerText=roomId
+
+listenRoom()
+
+show("waiting")
+
+}
+
+
+
+window.joinRoom=async function(){
+
+roomId=document.getElementById("roomInput").value.toUpperCase()
+
+await update(ref(db,"rooms/"+roomId+"/players"),{
+
+[playerId]:true
+
+})
+
+document.getElementById("roomCode").innerText=roomId
+
+listenRoom()
+
+show("waiting")
+
+}
+
+
+
+function listenRoom(){
+
+onValue(ref(db,"rooms/"+roomId),(snap)=>{
+
+const room=snap.val()
+
+if(!room)return
+
+players=room.players||{}
+
+food=room.food||food
+
+document.getElementById("playerCount").innerText=
+Object.keys(players).length
+
+if(Object.keys(players).length>=2){
+
+startGame()
+
+}
+
+})
+
+}
+
+
+
+function startGame(){
+
+show("game")
+
+setInterval(gameLoop,150)
+
+syncPlayers()
+
+}
+
+
+
+document.addEventListener("keydown",(e)=>{
+
+if(e.key==="ArrowUp"){dx=0;dy=-grid}
+if(e.key==="ArrowDown"){dx=0;dy=grid}
+if(e.key==="ArrowLeft"){dx=-grid;dy=0}
+if(e.key==="ArrowRight"){dx=grid;dy=0}
+
+})
+
+
+
+function gameLoop(){
+
+let head={
+
+x:snake[0].x+dx,
+y:snake[0].y+dy
+
+}
+
+snake.unshift(head)
+
+if(head.x===food.x && head.y===food.y){
+
+food.x=Math.floor(Math.random()*20)*grid
+food.y=Math.floor(Math.random()*20)*grid
+
+set(ref(db,"rooms/"+roomId+"/food"),food)
+
+}else{
+
+snake.pop()
+
+}
+
+set(ref(db,"rooms/"+roomId+"/snakes/"+playerId),snake)
+
+draw()
+
+}
+
+
+
+function syncPlayers(){
+
+onValue(ref(db,"rooms/"+roomId+"/snakes"),(snap)=>{
+
+const data=snap.val()
+
+if(!data)return
+
+ctx.clearRect(0,0,400,400)
+
+for(let id in data){
+
+let s=data[id]
+
+ctx.fillStyle=id===playerId?"lime":"red"
+
+for(let part of s){
+
+ctx.fillRect(part.x,part.y,grid-2,grid-2)
+
+}
+
+}
+
+ctx.fillStyle="yellow"
+
+ctx.fillRect(food.x,food.y,grid-2,grid-2)
+
+})
+
+}
+
+
+
+function draw(){
+
+}
+
+</script>
+
+</body>
+</html>
