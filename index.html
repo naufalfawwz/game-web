@@ -1,295 +1,166 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Snake Multiplayer</title>
-
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Snake Multiplayer 2 Player</title>
 <style>
-
-body{
-background:#111;
-color:white;
-text-align:center;
-font-family:Arial;
-}
-
-#lobby,#waiting,#game{
-display:none;
-}
-
-canvas{
-background:black;
-border:3px solid white;
-}
-
-button,input{
-padding:10px;
-margin:5px;
-}
-
+body{margin:0;font-family:sans-serif;background:#000;color:#fff;text-align:center;}
+canvas{background:#111;display:block;margin:20px auto;border:3px solid #fff;}
+#lobby,#waiting{display:none;}
+button,input{padding:10px;margin:5px;font-size:16px;}
+#joystick{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);width:120px;height:120px;}
+#stick{width:50px;height:50px;background:#fff;border-radius:50%;position:absolute;top:35px;left:35px;opacity:0.7;}
 </style>
-
 </head>
-
 <body>
 
 <div id="lobby">
-
-<h2>Snake Multiplayer</h2>
-
-<button onclick="createRoom()">Create Room</button>
-
-<br><br>
-
-<input id="roomInput" placeholder="ROOM CODE">
-
-<button onclick="joinRoom()">Join Room</button>
-
+<h2>Snake Multiplayer 2 Player</h2>
+<button id="createRoom">Create Room</button><br>
+<input id="joinCode" placeholder="Room Code">
+<button id="joinRoom">Join Room</button>
 </div>
-
 
 <div id="waiting">
-
-<h2>Waiting Player...</h2>
-
-Room Code: <span id="roomCode"></span>
-
-<br><br>
-
-Players: <span id="playerCount"></span>/4
-
+<h2>Waiting for 2nd Player...</h2>
+<p id="roomCodeText"></p>
+<p id="playerCountText"></p>
 </div>
-
-
-<div id="game">
 
 <canvas id="gameCanvas" width="400" height="400"></canvas>
-
-</div>
-
+<div id="joystick"><div id="stick"></div></div>
 
 <script type="module">
+import { db, ref, set, get, onValue } from "../firebase.js";
 
-import { db, ref, set, update, onValue }
-from "../firebase.js";
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
 
+const lobby = document.getElementById('lobby');
+const waiting = document.getElementById('waiting');
+const roomCodeText = document.getElementById('roomCodeText');
+const playerCountText = document.getElementById('playerCountText');
 
-const grid=20
+const joystick = document.getElementById('joystick');
+const stick = document.getElementById('stick');
 
-const canvas=document.getElementById("gameCanvas")
-const ctx=canvas.getContext("2d")
+let roomCode = '';
+let playerKey = '';
+let playerId = Math.random().toString(36).substr(2,5);
 
-const playerId=Math.random().toString(36).substr(2,9)
+let snakes = {}; // state for all snakes
+let gameInterval = null;
 
-let roomId=null
+// Direction
+let dir = 'right';
+let touchDir = null;
 
-let snake=[{x:200,y:200}]
+function show(element){lobby.style.display='none';waiting.style.display='none';canvas.style.display='none';joystick.style.display='none';element.style.display='block';}
 
-let dx=grid
-let dy=0
+show(lobby);
 
-let players={}
+// ===== ROOM CODE =====
+function randomCode(){return Math.random().toString(36).substr(2,4).toUpperCase();}
 
-let food={x:100,y:100}
-
-
-
-function show(id){
-
-document.getElementById("lobby").style.display="none"
-document.getElementById("waiting").style.display="none"
-document.getElementById("game").style.display="none"
-
-document.getElementById(id).style.display="block"
-
+// ===== CREATE ROOM =====
+document.getElementById('createRoom').onclick = async () => {
+  roomCode = randomCode();
+  playerKey = 'player1';
+  await set(ref(db,`rooms/${roomCode}/players/${playerKey}`),{id:playerId,x:50,y:50,dir:'right',segments:[{x:50,y:50}]});
+  await set(ref(db,`rooms/${roomCode}/state`),'waiting');
+  show(waiting);
+  roomCodeText.innerText = `Room Code: ${roomCode}`;
+  listenRoom();
 }
 
-show("lobby")
-
-
-
-function code(){
-
-const c="ABCDEFGHJKLMNPQRSTUVWXYZ123456789"
-
-let r=""
-
-for(let i=0;i<4;i++){
-
-r+=c[Math.floor(Math.random()*c.length)]
-
+// ===== JOIN ROOM =====
+document.getElementById('joinRoom').onclick = async () => {
+  roomCode = document.getElementById('joinCode').value.toUpperCase();
+  const snap = await get(ref(db,`rooms/${roomCode}`));
+  if(!snap.exists()){alert("Room not found"); return;}
+  const players = snap.val().players||{};
+  if(Object.keys(players).length>=2){alert("Room full"); return;}
+  playerKey = Object.keys(players).length===0?'player1':'player2';
+  const startX = playerKey==='player1'?50:350;
+  const startY = playerKey==='player1'?50:350;
+  await set(ref(db,`rooms/${roomCode}/players/${playerKey}`),{id:playerId,x:startX,y:startY,dir:playerKey==='player1'?'right':'left',segments:[{x:startX,y:startY}]});
+  await set(ref(db,`rooms/${roomCode}/state`),'playing');
+  show(waiting);
+  roomCodeText.innerText = `Room Code: ${roomCode}`;
+  listenRoom();
 }
 
-return r
-
-}
-
-
-
-window.createRoom=async function(){
-
-roomId=code()
-
-await set(ref(db,"rooms/"+roomId),{
-
-players:{
-[playerId]:true
-},
-
-food
-
-})
-
-document.getElementById("roomCode").innerText=roomId
-
-listenRoom()
-
-show("waiting")
-
-}
-
-
-
-window.joinRoom=async function(){
-
-roomId=document.getElementById("roomInput").value.toUpperCase()
-
-await update(ref(db,"rooms/"+roomId+"/players"),{
-
-[playerId]:true
-
-})
-
-document.getElementById("roomCode").innerText=roomId
-
-listenRoom()
-
-show("waiting")
-
-}
-
-
-
+// ===== LISTEN ROOM =====
 function listenRoom(){
-
-onValue(ref(db,"rooms/"+roomId),(snap)=>{
-
-const room=snap.val()
-
-if(!room)return
-
-players=room.players||{}
-
-food=room.food||food
-
-document.getElementById("playerCount").innerText=
-Object.keys(players).length
-
-if(Object.keys(players).length>=2){
-
-startGame()
-
+  const playersRef = ref(db,`rooms/${roomCode}/players`);
+  onValue(playersRef, snap=>{
+    const players = snap.val();
+    if(!players) return;
+    snakes = players;
+    playerCountText.innerText = `Players: ${Object.keys(players).length}/2`;
+    if(Object.keys(players).length===2 && !gameInterval){
+      waiting.style.display='none';
+      canvas.style.display='block';
+      joystick.style.display='block';
+      startGame();
+    }
+  });
 }
 
-})
-
-}
-
-
-
+// ===== GAME =====
 function startGame(){
+  document.addEventListener('keydown',e=>{
+    if(e.key==='ArrowUp') dir='up';
+    if(e.key==='ArrowDown') dir='down';
+    if(e.key==='ArrowLeft') dir='left';
+    if(e.key==='ArrowRight') dir='right';
+  });
 
-show("game")
+  // TOUCH JOYSTICK
+  let startX,startY;
+  stick.addEventListener('touchstart',e=>{const t=e.touches[0]; startX=t.clientX; startY=t.clientY;});
+  stick.addEventListener('touchmove',e=>{
+    const t=e.touches[0];
+    const dx=t.clientX-startX;
+    const dy=t.clientY-startY;
+    if(Math.abs(dx)>Math.abs(dy)){dir=dx>0?'right':'left';}else{dir=dy>0?'down':'up';}
+  });
 
-setInterval(gameLoop,150)
-
-syncPlayers()
-
+  gameInterval = setInterval(gameLoop,120);
 }
-
-
-
-document.addEventListener("keydown",(e)=>{
-
-if(e.key==="ArrowUp"){dx=0;dy=-grid}
-if(e.key==="ArrowDown"){dx=0;dy=grid}
-if(e.key==="ArrowLeft"){dx=-grid;dy=0}
-if(e.key==="ArrowRight"){dx=grid;dy=0}
-
-})
-
-
 
 function gameLoop(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
 
-let head={
+  for(let key in snakes){
+    let s = snakes[key];
 
-x:snake[0].x+dx,
-y:snake[0].y+dy
+    // hanya update direction untuk player sendiri
+    if(key===playerKey) s.dir=dir;
 
+    // update head
+    const head = {x:s.segments[s.segments.length-1].x, y:s.segments[s.segments.length-1].y};
+    if(s.dir==='up') head.y -=10;
+    if(s.dir==='down') head.y +=10;
+    if(s.dir==='left') head.x -=10;
+    if(s.dir==='right') head.x +=10;
+
+    s.segments.push(head);
+    if(s.segments.length>10) s.segments.shift();
+
+    // collision check
+    if(head.x<0 || head.x>=400 || head.y<0 || head.y>=400){alert("Game Over!"); clearInterval(gameInterval); return;}
+    for(let other of s.segments.slice(0,-1)){if(other.x===head.x && other.y===head.y){alert("Game Over!"); clearInterval(gameInterval); return;}}
+
+    // draw snake
+    ctx.fillStyle = key===playerKey?'lime':'red';
+    s.segments.forEach(seg=>ctx.fillRect(seg.x,seg.y,10,10));
+
+    // sync to Firebase
+    set(ref(db,`rooms/${roomCode}/players/${key}`),s);
+  }
 }
-
-snake.unshift(head)
-
-if(head.x===food.x && head.y===food.y){
-
-food.x=Math.floor(Math.random()*20)*grid
-food.y=Math.floor(Math.random()*20)*grid
-
-set(ref(db,"rooms/"+roomId+"/food"),food)
-
-}else{
-
-snake.pop()
-
-}
-
-set(ref(db,"rooms/"+roomId+"/snakes/"+playerId),snake)
-
-draw()
-
-}
-
-
-
-function syncPlayers(){
-
-onValue(ref(db,"rooms/"+roomId+"/snakes"),(snap)=>{
-
-const data=snap.val()
-
-if(!data)return
-
-ctx.clearRect(0,0,400,400)
-
-for(let id in data){
-
-let s=data[id]
-
-ctx.fillStyle=id===playerId?"lime":"red"
-
-for(let part of s){
-
-ctx.fillRect(part.x,part.y,grid-2,grid-2)
-
-}
-
-}
-
-ctx.fillStyle="yellow"
-
-ctx.fillRect(food.x,food.y,grid-2,grid-2)
-
-})
-
-}
-
-
-
-function draw(){
-
-}
-
 </script>
 
 </body>
